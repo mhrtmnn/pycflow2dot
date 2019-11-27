@@ -23,6 +23,7 @@ import subprocess
 import locale
 import re
 import networkx as nx
+from greenery import fsm,lego
 try:
     import pydot
 except:
@@ -499,6 +500,55 @@ def rm_excluded_funcs(list_fname, graphs):
             if node in graph:
                 graph.remove_node(node)
 
+def graph2fsm(g):
+    states = set(g.node.keys())
+
+    # map alphabet to regex compatible chars
+    sym = 'a'
+    alph_mapper = dict()
+    for state in states:
+        alph_mapper[state] = sym
+        sym = chr(ord(sym) + 1)
+
+    # transitions: (FROM_STATE -> (INPUT -> TO_STATE))
+    transistions = dict()
+    for state in states:
+        succs = g.adj.get(state)
+        succs = set(succs.keys())
+        transistions[state] = dict(
+            map(lambda e: (alph_mapper.get(e), e), succs)
+        )
+
+    # find start node
+    start_node = ""
+    for (k, v) in g.in_degree().items():
+        if v == 0:
+            if start_node != "":
+                print("Error: More than one start states!")
+            else:
+                start_node = k
+
+    # find end nodes
+    end_nodes = dict((k, v) for k, v in g.out_degree().items() if v == 0)
+    end_nodes = set(end_nodes.keys())
+
+    # construct fsm from digraph data
+    f = fsm.fsm(
+        alphabet=alph_mapper.values(),
+        states=states,
+        initial=start_node,
+        finals=end_nodes,
+        map=transistions,
+    )
+
+    # convert fsm to regex
+    r = lego.from_fsm(f)
+    print("Regex: {}".format(r))
+    print("Regex Mapping:\n--------------")
+    for (k,v) in alph_mapper.items():
+        print("{}: \t {}".format(v, k))
+
+    return r
 
 def main():
     """Run cflow, parse output, produce dot and compile it into pdf | svg."""
@@ -534,6 +584,7 @@ def main():
     graphs = []
     for cflow_out, c_fname in zip(cflow_strs, c_fnames):
         cur_graph = cflow2nx(cflow_out, c_fname)
+        graph2fsm(cur_graph)
         graphs += [cur_graph]
 
     rm_excluded_funcs(exclude_list_fname, graphs)
